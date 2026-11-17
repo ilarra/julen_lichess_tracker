@@ -19,7 +19,7 @@ Chapter states: *Not cloned* → *Cloned, not started* → *In progress* → *Do
 ## Setup (mini PC)
 
 ```bash
-cd julen-chess-tracker
+cd julen_lichess_tracker
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 cp config.example.toml config.toml   # then edit usernames + token
@@ -40,7 +40,7 @@ https://lichess.org/account/oauth/token/create?scopes[]=study:read&description=S
 Daily sync via cron (`crontab -e`):
 
 ```
-17 7 * * * cd /path/to/julen-chess-tracker && .venv/bin/python tracker.py sync >> data/sync.log 2>&1
+17 7 * * * cd /path/to/julen_lichess_tracker && .venv/bin/python tracker.py sync >> data/sync.log 2>&1
 ```
 
 ## Things to check on the first real run
