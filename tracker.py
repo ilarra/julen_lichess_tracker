@@ -24,6 +24,7 @@ import hashlib
 import html
 import io
 import json
+import shutil
 import os
 import re
 import sqlite3
@@ -39,6 +40,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import chess
+import chess.engine
 import chess.pgn
 
 ROOT = Path(__file__).resolve().parent
@@ -62,6 +64,10 @@ class Config:
     # chapter names that mark homework (other set-up positions count as class exercises)
     homework_names: list[str] = field(default_factory=lambda: ["ETXE", "HOMEWORK", "CASA"])
     # dashboard sections: first track whose words appear in the study name; a track without words catches the rest
+    stockfish: str = ""            # path; found automatically when empty
+    engine_depth: int = 18
+    engine_seconds: float = 1.5
+    engine_tolerance_cp: int = 50   # an answer this close to Stockfish's best counts as good
     tracks: list[dict] = field(default_factory=lambda: [{"name": "Classes", "match": []}])
     db_path: Path = ROOT / "data" / "tracker.db"
     report_path: Path = ROOT / "data" / "report.html"
@@ -80,6 +86,10 @@ class Config:
         cfg.solution_names = raw.get("solution_names", cfg.solution_names)
         cfg.homework_names = raw.get("homework_names", cfg.homework_names)
         cfg.tracks = raw.get("tracks", cfg.tracks)
+        cfg.stockfish = raw.get("stockfish", cfg.stockfish)
+        cfg.engine_depth = raw.get("engine_depth", cfg.engine_depth)
+        cfg.engine_seconds = raw.get("engine_seconds", cfg.engine_seconds)
+        cfg.engine_tolerance_cp = raw.get("engine_tolerance_cp", cfg.engine_tolerance_cp)
         if "db_path" in raw:
             cfg.db_path = (path.parent / raw["db_path"]).resolve()
         if "report_path" in raw:
@@ -247,6 +257,9 @@ CREATE TABLE IF NOT EXISTS games (
   color TEXT, winner TEXT, status TEXT, plies INTEGER, raw TEXT
 );
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS position_analysis (
+  root TEXT PRIMARY KEY, fen TEXT NOT NULL, lines TEXT NOT NULL, depth INTEGER, analysed_at TEXT
+);
 """
 
 
@@ -406,6 +419,7 @@ VERDICTS = {
     "solved": "Solved",              # follows the teacher's solution as far as Julen went
     "partly": "Right start",         # first move right, then deviates
     "seen": "Seen in analysis",      # solution's first move is in his tree, but not his main line
+    "alternative": "Engine approves",   # differs from the teacher's solution, but Stockfish rates it as good
     "missed": "Missed",
     "pending": "No solution yet",
     "not_tried": "Not tried",
@@ -425,7 +439,9 @@ class ExerciseProgress:
     solution: str                 # teacher's first move (SAN), when known
     solution_plies: int
     difficulty: int | None        # 1–5
-    difficulty_source: str        # teacher | solution | ""
+    difficulty_source: str        # teacher | engine | solution | ""
+    difficulty_why: list[str]
+    engine_move: str              # Stockfish's choice (SAN), when analysed
     practice_games: int
     practice_wins: int
     best_ai_level_beaten: int | None
@@ -463,6 +479,7 @@ def grade(answer: list[str], tried: set[tuple[str, str]], root: str, solution: l
 def build_progress(cfg: Config, db) -> list[dict]:
     games = db.execute("SELECT * FROM games").fetchall()
     studies = {r["id"]: r for r in db.execute("SELECT * FROM studies")}
+    analysis = {r["root"]: (r["fen"], json.loads(r["lines"])) for r in db.execute("SELECT * FROM position_analysis")}
     chapters = {sid: latest_chapters(db, sid) for sid in studies}
 
     # every solution chapter anywhere, by starting position (teacher's own copy preferred)
@@ -530,11 +547,27 @@ def build_progress(cfg: Config, db) -> list[dict]:
                         and fen_key_str(gm["initial_fen"]) != STANDARD_START]
             wins = [gm for gm in practice if gm["winner"] == gm["color"]]
             tag = base.difficulty_tag
-            difficulty = tag or (min(5, max(1, (len(sol_moves) + 1) // 2)) if sol_moves else None)
+            why, engine_move = [], ""
+            if tag:
+                difficulty, source = tag, "teacher"
+            elif base.root in analysis and analysis[base.root][1]:
+                fen, lines = analysis[base.root]
+                difficulty, why = engine_difficulty(fen, lines, len(sol_moves))
+                source = "engine"
+                engine_move = san(base.tags, [lines[0][0]])
+            elif sol_moves:
+                difficulty, source = min(5, max(1, (len(sol_moves) + 1) // 2)), "solution"
+            else:
+                difficulty, source = None, ""
+            if verdict in ("missed", "seen") and base.root in analysis and mine and mine.mainline:
+                lines = analysis[base.root][1]
+                scores = {u: cp for u, cp, _, _ in lines}
+                if mine.mainline[0] in scores and scores[mine.mainline[0]] >= lines[0][1] - cfg.engine_tolerance_cp:
+                    verdict = "alternative"
             exercises.append(ExerciseProgress(
                 n, base.name, chapter_kind(cfg, base), moves, len(new_comments), verdict,
                 san(base.tags, mine.mainline) if mine and moves else "", san(base.tags, sol_moves), len(sol_moves),
-                difficulty, "teacher" if tag else ("solution" if sol_moves else ""),
+                difficulty, source, why, engine_move,
                 len(practice), len(wins), max((gm["ai_level"] for gm in wins), default=None), done_marked))
 
         first = studies[g["copies"][0]] if g["copies"] else studies[g["original"]]
@@ -553,9 +586,124 @@ def build_progress(cfg: Config, db) -> list[dict]:
     return out
 
 
+# --------------------------------------------------------------------------- engine difficulty
+
+PIECE_VALUE = {chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3, chess.ROOK: 5, chess.QUEEN: 9, chess.KING: 0}
+MATE = 10_000
+
+
+def find_stockfish(cfg: Config) -> str | None:
+    for candidate in (cfg.stockfish, os.environ.get("STOCKFISH_PATH"), "stockfish", "/usr/games/stockfish"):
+        if candidate and (shutil.which(candidate) or Path(candidate).is_file()):
+            return shutil.which(candidate) or candidate
+    return None
+
+
+def exercise_positions(cfg: Config, db) -> dict[str, str]:
+    """root key -> full FEN for every exercise chapter in the database."""
+    out = {}
+    for (sid,) in db.execute("SELECT id FROM studies"):
+        for ch in latest_chapters(db, sid):
+            if chapter_kind(cfg, ch) in ("homework", "exercise"):
+                out.setdefault(ch.root, ch.tags.get("FEN", chess.STARTING_FEN))
+    return out
+
+
+def analyse_positions(cfg: Config, db, log=print, limit=None) -> int:
+    """Run Stockfish once per new exercise position and store the top 3 moves."""
+    path = find_stockfish(cfg)
+    if not path:
+        log("Stockfish not found: difficulty falls back to solution length")
+        return 0
+    done = {r[0] for r in db.execute("SELECT root FROM position_analysis")}
+    todo = {k: v for k, v in exercise_positions(cfg, db).items() if k not in done}
+    if not todo:
+        return 0
+    limit = limit or chess.engine.Limit(depth=cfg.engine_depth, time=cfg.engine_seconds)
+    with chess.engine.SimpleEngine.popen_uci(path) as engine:
+        for root, fen in todo.items():
+            board = chess.Board(fen)
+            if board.is_game_over() or not any(board.legal_moves):
+                continue
+            infos = engine.analyse(board, limit, multipv=3)
+            lines = [(i["pv"][0].uci(), i["score"].pov(board.turn).score(mate_score=MATE),
+                      i["score"].pov(board.turn).mate(), [m.uci() for m in i["pv"][:12]]) for i in infos if i.get("pv")]
+            db.execute("INSERT OR REPLACE INTO position_analysis VALUES (?,?,?,?,?)",
+                       (root, fen, json.dumps(lines), infos[0].get("depth"), now_iso()))
+    db.commit()
+    log(f"Analysed {len(todo)} new exercise positions with Stockfish")
+    return len(todo)
+
+
+def is_sacrifice(board: chess.Board, move: chess.Move) -> bool:
+    """The moved piece can be taken by something cheaper than it (minus what it captured)."""
+    piece = board.piece_at(move.from_square)
+    if not piece or piece.piece_type == chess.KING:
+        return False
+    captured = board.piece_at(move.to_square)
+    gain = PIECE_VALUE[captured.piece_type] if captured else (1 if board.is_en_passant(move) else 0)
+    after = board.copy()
+    after.push(move)
+    attackers = after.attackers(after.turn, move.to_square)
+    if not attackers:
+        return False
+    cheapest = min(PIECE_VALUE[after.piece_at(sq).piece_type] or 100 for sq in attackers)
+    defended = bool(after.attackers(not after.turn, move.to_square))
+    loss = PIECE_VALUE[piece.piece_type] - (cheapest if defended else 0)
+    return loss - gain >= 2
+
+
+def engine_difficulty(fen: str, lines: list, solution_plies: int = 0) -> tuple[int, list[str]]:
+    """1–5 rating from Stockfish's top lines, with the reasons behind it."""
+    board = chess.Board(fen)
+    best_uci, best_cp, mate, pv = lines[0]
+    best = chess.Move.from_uci(best_uci)
+    second_cp = lines[1][1] if len(lines) > 1 else None
+    score, why = 1.0, []
+
+    quiet = not (board.is_capture(best) or board.gives_check(best) or best.promotion)
+    if quiet:
+        score += 1.5
+        why.append("quiet move")
+    if is_sacrifice(board, best):
+        score += 1.5
+        why.append("sacrifice")
+    plies = solution_plies
+    if mate and mate > 0:
+        plies = max(plies, 2 * mate - 1)
+        why.append(f"mate in {mate}")
+    elif not plies:
+        # length of the forcing part of the engine line (checks and captures by the solver)
+        plies = 1
+        b = board.copy()
+        for i, u in enumerate(pv):
+            m = chess.Move.from_uci(u)
+            if i % 2 == 0 and i and not (b.is_capture(m) or b.gives_check(m)):
+                break
+            b.push(m)
+            plies = i + 1
+    deep = (plies + 1) // 2
+    if deep >= 2:
+        score += min(2.0, 0.6 * (deep - 1))
+        why.append(f"{deep} moves deep")
+    if second_cp is not None:
+        gap = best_cp - second_cp
+        if gap >= 150:
+            score += 0.5
+            why.append("only one move works")
+        elif gap < 40 and abs(best_cp) < MATE - 100:
+            score -= 1
+            why.append("several moves work")
+    temptations = sum(1 for m in board.legal_moves if m != best and (board.is_capture(m) or board.gives_check(m)))
+    if quiet and temptations >= 4:
+        score += 0.5
+        why.append("tempting checks/captures")
+    return max(1, min(5, round(score))), why
+
+
 # --------------------------------------------------------------------------- report
 
-VERDICT_CLASS = {"solved": "good", "partly": "mid", "seen": "mid", "missed": "bad",
+VERDICT_CLASS = {"solved": "good", "alternative": "good", "partly": "mid", "seen": "mid", "missed": "bad",
                  "pending": "wait", "not_tried": "idle", "not_cloned": "bad"}
 
 
@@ -563,8 +711,8 @@ def track_summary(studies: list[dict]) -> str:
     allx = [x for s in studies for x in s["exercises"]]
     tried = [x for x in allx if x.verdict not in ("not_tried", "not_cloned")]
     graded = [x for x in tried if x.verdict != "pending"]
-    solved = sum(1 for x in graded if x.verdict == "solved")
-    good_start = sum(1 for x in graded if x.verdict in ("solved", "partly"))
+    solved = sum(1 for x in graded if x.verdict in ("solved", "alternative"))
+    good_start = sum(1 for x in graded if x.verdict in ("solved", "alternative", "partly"))
 
     def pct(a, b):
         return f"{round(100 * a / b)}%" if b else "—"
@@ -590,7 +738,7 @@ def render_report(cfg: Config, db) -> str:
     for s in studies:
         xs = s["exercises"]
         n_tried = sum(1 for x in xs if x.verdict not in ("not_tried", "not_cloned"))
-        n_solved = sum(1 for x in xs if x.verdict == "solved")
+        n_solved = sum(1 for x in xs if x.verdict in ("solved", "alternative"))
         links = []
         if s["original"]:
             links.append(f'<a href="{API}/study/{s["original"]}">teacher\'s study</a>')
@@ -607,8 +755,10 @@ def render_report(cfg: Config, db) -> str:
             detail = []
             if x.answer:
                 detail.append(f"played <b>{e(x.answer)}</b>")
-            if x.solution and x.verdict in ("missed", "seen", "partly", "solved"):
+            if x.solution and x.verdict in ("missed", "seen", "partly", "solved", "alternative"):
                 detail.append(f"solution <b>{e(x.solution)}</b>")
+            if x.engine_move and x.verdict in ("pending", "missed", "seen") and x.engine_move != x.solution:
+                detail.append("engine agrees ✓" if x.engine_move == x.answer else f"engine <b>{e(x.engine_move)}</b>")
             practice = "—"
             if x.practice_games:
                 practice = f"{x.practice_wins}/{x.practice_games} won"
@@ -616,8 +766,10 @@ def render_report(cfg: Config, db) -> str:
                     practice += f" · lvl {x.best_ai_level_beaten}"
             dots = ("".join(f'<i class="{"on" if i < x.difficulty else ""}"></i>' for i in range(5))
                     if x.difficulty else '<small>—</small>')
-            dtitle = {"teacher": "set by the teacher", "solution": f"solution is {x.solution_plies} moves long"}.get(
-                x.difficulty_source, "no solution yet")
+            dtitle = {"teacher": "set by the teacher",
+                      "engine": "Stockfish: " + (", ".join(x.difficulty_why) or "straightforward"),
+                      "solution": f"solution is {x.solution_plies} half-moves long"}.get(x.difficulty_source, "not rated yet")
+            dwhy = f'<div class="detail">{e(", ".join(x.difficulty_why[:2]))}</div>' if x.difficulty_why else ""
             kind = "Home" if x.kind == "homework" else "Class"
             rows.append(f"""<tr>
               <td class="num idx">{x.number}</td>
@@ -625,7 +777,7 @@ def render_report(cfg: Config, db) -> str:
               <td class="num">{x.moves or '—'}</td>
               <td>{check}<div class="detail">{' · '.join(detail)}</div></td>
               <td>{practice}</td>
-              <td><span class="dots" title="{e(dtitle)}">{dots}</span></td></tr>""")
+              <td><span class="dots" title="{e(dtitle)}">{dots}</span>{dwhy}</td></tr>""")
         bar = round(100 * n_tried / len(xs)) if xs else 0
         cards.setdefault(s["track"], []).append(f"""<section class="card">
           <header><div><h2>{e(s['name'])}</h2>
@@ -686,8 +838,11 @@ footer{{color:var(--mut);font-size:12px;margin-top:24px;line-height:1.6}}
 <footer>Exercises are the chapters that start from a set-up position (games and solution chapters are not counted).
 <b>Moves</b> are the moves {e(cfg.student)} added in his copy. <b>Check</b> compares his main line with the teacher's
 solution chapter for the same position, usually published in the next class: <i>Solved</i> = same moves as far as he went,
-<i>Right start</i> = first move right, <i>Seen in analysis</i> = he looked at the right move but chose another.
-<b>Difficulty</b> is the length of the solution (or a <code>[Difficulty "1-5"]</code> tag set by the teacher).</footer>
+<i>Right start</i> = first move right, <i>Seen in analysis</i> = he looked at the right move but chose another,
+<i>Engine approves</i> = a different move from the teacher's that Stockfish rates within half a pawn of the best.
+<b>Difficulty</b> (1–5) comes from Stockfish: quiet moves, sacrifices, long forcing lines and positions where only one
+move works rate higher; several good moves rate lower. Hover the dots for the reasons. A <code>[Difficulty "1-5"]</code>
+tag set by the teacher overrides it.</footer>
 </main></body></html>"""
 
 
@@ -706,6 +861,7 @@ def main(argv=None):
             cfg.db_path.unlink()
         db = connect(cfg.db_path)
         sync(cfg, FakeLichess(), db)
+        analyse_positions(cfg, db)
         cfg.report_path.write_text(render_report(cfg, db))
         print(f"Demo report: {cfg.report_path}")
         return
@@ -716,6 +872,7 @@ def main(argv=None):
         if not cfg.token:
             print("Warning: no Lichess token set; only public studies will be visible.", file=sys.stderr)
         sync(cfg, Lichess(cfg.token), db)
+        analyse_positions(cfg, db)
     cfg.report_path.parent.mkdir(parents=True, exist_ok=True)
     cfg.report_path.write_text(render_report(cfg, db))
     print(f"Report: {cfg.report_path}")

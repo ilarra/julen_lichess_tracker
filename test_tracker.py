@@ -1,10 +1,12 @@
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
 
 import demo_data
 from demo_data import DEMO_CONFIG
-from tracker import Config, build_progress, connect, parse_study_pgn, render_report, study_id_from, sync, track_of
+from tracker import (Config, analyse_positions, build_progress, connect, engine_difficulty, find_stockfish,
+                     parse_study_pgn, render_report, study_id_from, sync, track_of)
 
 
 class CountingLichess(demo_data.FakeLichess):
@@ -95,6 +97,62 @@ class TrackerTest(unittest.TestCase):
         self.assertEqual(study_id_from("https://lichess.org/study/AbCdEfGh/IjKlMnOp"), "AbCdEfGh")
         chs = parse_study_pgn("x", demo_data.student_studies()["jklase02"][1])
         self.assertEqual([c.is_game for c in chs], [False, False, False, True, False, False])
+
+
+class DifficultyTest(unittest.TestCase):
+    """engine_difficulty on hand-written engine lines: (uci, centipawns, mate, pv)."""
+
+    def test_simple_capture_with_several_good_moves_is_easy(self):
+        fen = "4k3/8/8/3q4/8/8/3R4/4K3 w - - 0 1"      # Rxd5 wins the queen
+        lines = [("d2d5", 900, None, ["d2d5"]), ("d2d4", 880, None, ["d2d4"])]
+        self.assertEqual(engine_difficulty(fen, lines)[0], 1)
+
+    def test_quiet_only_move_sacrifice_is_hard(self):
+        fen = "6k1/5ppp/8/8/8/8/1Q3PPP/6K1 w - - 0 1"
+        lines = [("b2b7", 300, None, ["b2b7", "g8f8", "b7b8"]), ("b2b3", 0, None, ["b2b3"])]
+        rating, why = engine_difficulty(fen, lines, solution_plies=5)
+        self.assertGreaterEqual(rating, 4)
+        self.assertIn("quiet move", why)
+        self.assertIn("only one move works", why)
+
+    def test_mate_depth_counts(self):
+        fen = "6k1/5ppp/8/8/8/8/5PPP/R5K1 w - - 0 1"
+        _, why = engine_difficulty(fen, [("a1a8", 9999, 1, ["a1a8"])])
+        self.assertIn("mate in 1", why)
+
+
+class EngineVerdictTest(unittest.TestCase):
+    def test_answer_rated_good_by_engine_is_not_missed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Config(**{**DEMO_CONFIG.__dict__, "db_path": Path(tmp) / "t.db"})
+            db = connect(cfg.db_path)
+            sync(cfg, demo_data.FakeLichess(), db, log=lambda *a: None)
+            # pretend Stockfish likes Julen's Qa6 in P3 as much as the teacher's Qb5+
+            from demo_data import P3
+            from tracker import fen_key_str
+            import json
+            db.execute("INSERT INTO position_analysis VALUES (?,?,?,?,?)",
+                       (fen_key_str(P3), P3, json.dumps([["e2b5", 500, None, ["e2b5"]], ["e2a6", 480, None, ["e2a6"]]]),
+                        18, "x"))
+            k1 = next(s for s in build_progress(cfg, db) if s["name"] == "Online Klase1")
+            p3 = k1["exercises"][3]
+            self.assertEqual(p3.verdict, "alternative")
+            self.assertEqual(p3.difficulty_source, "engine")
+            db.close()
+
+    @unittest.skipUnless(find_stockfish(DEMO_CONFIG), "Stockfish not installed")
+    def test_real_stockfish_finds_back_rank_mate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Config(**{**DEMO_CONFIG.__dict__, "db_path": Path(tmp) / "t.db", "engine_seconds": 0.2,
+                            "engine_depth": 10})
+            db = connect(cfg.db_path)
+            sync(cfg, demo_data.FakeLichess(), db, log=lambda *a: None)
+            self.assertGreater(analyse_positions(cfg, db, log=lambda *a: None), 0)
+            self.assertEqual(analyse_positions(cfg, db, log=lambda *a: None), 0)   # cached
+            p1 = next(s for s in build_progress(cfg, db) if s["name"] == "Online Klase1")["exercises"][1]
+            self.assertEqual(p1.engine_move, "Ra8#")
+            self.assertIn("mate in 1", p1.difficulty_why)
+            db.close()
 
 
 if __name__ == "__main__":

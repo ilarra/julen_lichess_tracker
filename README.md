@@ -13,7 +13,8 @@ so new classes appear without any setup.
 | **Exercises** | Chapters starting from a set-up position that aren't games or solutions. Names containing `ETXE` are homework, the rest class exercises |
 | **Moves** | Moves Julen added. If the teacher's original is linked in `extra_studies`, the teacher's own moves are left out |
 | **Check** | Julen's main line compared with the teacher's solution chapter (`EBAZPENA`) for the same position, usually in the next class: *Solved*, *Right start*, *Seen in analysis* (right move only in a side line), *Missed*, or *No solution yet* |
-| **Difficulty** | Length of the solution, or a `[Difficulty "1"–"5"]` tag if the teacher sets one |
+| **Difficulty** | Stockfish rates each exercise position once (1–5): quiet best move, sacrifice, long forcing line and "only one move works" push it up; several good moves push it down. Hover the dots for the reasons. A `[Difficulty "1"–"5"]` tag from the teacher overrides it; without Stockfish, the solution length is used |
+| **Engine approves** | An answer that differs from the teacher's solution but that Stockfish rates within half a pawn of the best move |
 | **Vs computer** | Games against the Lichess AI that started from a position in the exercise or Julen's line: won/played and highest level beaten |
 | **Tracks** | Sections of the dashboard, assigned by words in the study name (`[[tracks]]` in the config) |
 
@@ -42,6 +43,7 @@ Usernames come from `config.example.toml`.
 cd julen_lichess_tracker
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
+sudo apt install stockfish        # optional, for difficulty ratings
 cp config.example.toml config.toml   # then edit usernames + token
 ```
 

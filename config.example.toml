@@ -23,6 +23,13 @@ extra_studies = [
 # A chapter is marked ✅ when Julen adds a comment containing one of these:
 # done_markers = ["✅", "done", "hecho", "eginda"]
 
+# Stockfish difficulty ratings. Found automatically (also via STOCKFISH_PATH); without it,
+# difficulty falls back to the length of the teacher's solution.
+# stockfish = "/usr/games/stockfish"
+# engine_depth = 18
+# engine_seconds = 1.5
+# engine_tolerance_cp = 50   # answers this close to the best move count as "Engine approves"
+
 # db_path = "data/tracker.db"
 # report_path = "data/report.html"
 
