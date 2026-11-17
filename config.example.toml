@@ -1,4 +1,5 @@
 # Copy to config.toml and fill in. config.toml is git-ignored; it holds the token.
+# On GitHub Actions the token comes from the LICHESS_TOKEN secret instead.
 
 student = "julenlarra"
 teacher = "markel3"
@@ -7,19 +8,39 @@ teacher = "markel3"
 # Create at https://lichess.org/account/oauth/token/create?scopes[]=study:read&description=Study+tracker
 token = "lip_xxxxxxxxxxxxxxxx"
 
-# Studies the teacher shared by link that don't appear in the teacher's study list
-# (e.g. private ones). Full links or 8-character ids both work.
+# Teacher's study links (the ones he shares). Optional: Julen's copies are tracked
+# without them, but with the original the tracker can tell his moves from the teacher's
+# and show classes he hasn't copied yet. Full links or 8-character ids both work.
 extra_studies = [
-  "https://lichess.org/study/VXfQjo3L",
+  "https://lichess.org/study/VXfQjo3L",   # Aloñamendi Online Klase6
 ]
 
-# Only needed if a clone can't be matched automatically (by name or chapter names).
-# teacher study id = Julen's clone id
-[clone_links]
-# "AbCdEfGh" = "ZyXwVuTs"
+# Chapter names (case-insensitive substrings) for solutions and for homework.
+# Every other chapter that starts from a set-up position counts as a class exercise.
+# solution_names = ["EBAZPENA", "SOLUCION", "SOLUCIÓN", "SOLUTION"]
+# homework_names = ["ETXE", "HOMEWORK", "CASA"]
 
-# A chapter counts as Done when Julen adds a comment containing one of these:
+# A chapter is marked ✅ when Julen adds a comment containing one of these:
 # done_markers = ["✅", "done", "hecho", "eginda"]
 
 # db_path = "data/tracker.db"
 # report_path = "data/report.html"
+
+# Only needed if a copy isn't matched to its original automatically.
+# teacher study id = Julen's copy id
+[clone_links]
+# "AbCdEfGh" = "ZyXwVuTs"
+
+# Dashboard sections. A study goes to the first track with one of its words in the
+# study name (case and accents ignored); the track without words takes the rest.
+[[tracks]]
+name = "Aloñamendi Online · weekly class"
+match = ["Aloñamendi"]
+
+[[tracks]]
+name = "Tecnificación · monthly regional gathering"
+match = ["Tecnificacion"]
+
+[[tracks]]
+name = "1-to-1 with markel3"
+match = []

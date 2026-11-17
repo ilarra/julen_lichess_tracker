@@ -5,16 +5,19 @@ All data stays on this machine in a SQLite file under `data/`.
 
 ## What it measures
 
-| Signal | Where it comes from |
-|---|---|
-| **New assignment** | A new study in the teacher's list, or a link added to `extra_studies` |
-| **Cloned / not cloned** | Julen's studies matched to the teacher's by name, then by chapter names |
-| **Moves played, notes** | Moves and comments in Julen's clone that aren't in the teacher's original |
-| **Vs computer** | Julen's games against the Lichess AI that started from any position in a chapter: games won and the highest level beaten |
-| **Done** | Julen adds a comment containing ✅ / done / hecho / eginda (configurable) |
-| **Difficulty** | A `[Difficulty "1"–"5"]` chapter tag if the teacher adds one, otherwise an estimate from the size of the chapter |
+Julen copies each class study into his account and works in the copy. The tracker reads his copies,
+so new classes appear without any setup.
 
-Chapter states: *Not cloned* → *Cloned, not started* → *In progress* → *Done*.
+| Signal | How |
+|---|---|
+| **Exercises** | Chapters starting from a set-up position that aren't games or solutions. Names containing `ETXE` are homework, the rest class exercises |
+| **Moves** | Moves Julen added. If the teacher's original is linked in `extra_studies`, the teacher's own moves are left out |
+| **Check** | Julen's main line compared with the teacher's solution chapter (`EBAZPENA`) for the same position, usually in the next class: *Solved*, *Right start*, *Seen in analysis* (right move only in a side line), *Missed*, or *No solution yet* |
+| **Difficulty** | Length of the solution, or a `[Difficulty "1"–"5"]` tag if the teacher sets one |
+| **Vs computer** | Games against the Lichess AI that started from a position in the exercise or Julen's line: won/played and highest level beaten |
+| **Tracks** | Sections of the dashboard, assigned by words in the study name (`[[tracks]]` in the config) |
+
+Studies without exercises (tournament games, free analysis) and duplicate copies are folded away.
 
 ## Hosted on GitHub (daily sync + web page)
 
