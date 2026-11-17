@@ -10,7 +10,7 @@ token = "lip_xxxxxxxxxxxxxxxx"
 # Studies the teacher shared by link that don't appear in the teacher's study list
 # (e.g. private ones). Full links or 8-character ids both work.
 extra_studies = [
-  # "https://lichess.org/study/AbCdEfGh",
+  "https://lichess.org/study/VXfQjo3L",
 ]
 
 # Only needed if a clone can't be matched automatically (by name or chapter names).
