@@ -23,6 +23,7 @@ import hashlib
 import html
 import io
 import json
+import os
 import re
 import sqlite3
 import sys
@@ -61,7 +62,9 @@ class Config:
     def load(cls, path: Path) -> "Config":
         raw = tomllib.loads(path.read_text())
         cfg = cls(student=raw["student"], teacher=raw["teacher"])
-        cfg.token = raw.get("token", "")
+        cfg.token = os.environ.get("LICHESS_TOKEN") or raw.get("token", "")
+        if cfg.token.startswith("lip_xxx"):
+            cfg.token = ""
         cfg.extra_studies = [study_id_from(s) for s in raw.get("extra_studies", [])]
         cfg.clone_links = {study_id_from(k): study_id_from(v)
                            for k, v in raw.get("clone_links", {}).items()}
@@ -508,6 +511,7 @@ def render_report(cfg: Config, db) -> str:
                       for k, v in totals.items())
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
 <title>{e(cfg.student)}'s Chess Studies</title>
 <style>
 :root{{--bg:#f6f5f2;--card:#fff;--ink:#1d1d1b;--mut:#6b6a66;--line:#e6e4de;--acc:#2f6f4f;
@@ -571,6 +575,8 @@ def main(argv=None):
     cfg = Config.load(args.config)
     db = connect(cfg.db_path)
     if args.command == "sync":
+        if not cfg.token:
+            print("Warning: no Lichess token set; only public studies will be visible.", file=sys.stderr)
         sync(cfg, Lichess(cfg.token), db)
     cfg.report_path.parent.mkdir(parents=True, exist_ok=True)
     cfg.report_path.write_text(render_report(cfg, db))

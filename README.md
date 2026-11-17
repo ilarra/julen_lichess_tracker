@@ -16,7 +16,24 @@ All data stays on this machine in a SQLite file under `data/`.
 
 Chapter states: *Not cloned* → *Cloned, not started* → *In progress* → *Done*.
 
-## Setup (mini PC)
+## Hosted on GitHub (daily sync + web page)
+
+`.github/workflows/sync.yml` runs the sync every day at 05:23 UTC on GitHub's servers,
+keeps the database on the `data` branch, and publishes the report with GitHub Pages at
+`https://ilarra.github.io/julen_lichess_tracker/`.
+
+One-time setup in the repository settings:
+
+1. **Pages** (Settings → Pages): set *Source* to **GitHub Actions**.
+   Pages needs a public repository on a free plan, or GitHub Pro for a private one.
+   The published page is public either way; it's marked `noindex` so search engines skip it.
+2. **Token** (Settings → Secrets and variables → Actions → New repository secret):
+   name `LICHESS_TOKEN`, value = Julen's `study:read` token.
+3. **First run**: Actions tab → *Sync and publish* → *Run workflow*.
+
+Usernames come from `config.example.toml`.
+
+## Local setup (mini PC, optional)
 
 ```bash
 cd julen_lichess_tracker

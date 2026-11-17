@@ -1,0 +1,75 @@
+name: Sync and publish
+
+on:
+  schedule:
+    - cron: "23 5 * * *"   # daily, 05:23 UTC
+  workflow_dispatch:         # "Run workflow" button in the Actions tab
+
+permissions:
+  contents: write   # push the database to the `data` branch
+  pages: write
+  id-token: write
+
+concurrency:
+  group: sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore database from the data branch
+        run: |
+          mkdir -p data
+          if git fetch --depth 1 origin data 2>/dev/null; then
+            git show FETCH_HEAD:tracker.db > data/tracker.db
+            echo "Restored $(du -h data/tracker.db | cut -f1) database"
+          else
+            echo "No data branch yet, starting fresh"
+          fi
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Sync from Lichess
+        env:
+          LICHESS_TOKEN: ${{ secrets.LICHESS_TOKEN }}
+        run: |
+          cp config.example.toml config.toml
+          python tracker.py sync
+
+      - name: Save database to the data branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          dir="$RUNNER_TEMP/data-branch"
+          mkdir -p "$dir" && cp data/tracker.db "$dir/"
+          cd "$dir"
+          # one-commit branch, force-pushed: the database itself keeps the history
+          git init -q -b data
+          git add tracker.db
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -q -m "Database after sync $(date -u +%F)"
+          git push -q -f "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}" data
+
+      - name: Prepare site
+        run: |
+          mkdir -p site
+          cp data/report.html site/index.html
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deploy
+        uses: actions/deploy-pages@v4
