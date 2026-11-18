@@ -155,5 +155,60 @@ class EngineVerdictTest(unittest.TestCase):
             db.close()
 
 
+class CloneTest(unittest.TestCase):
+    def setUp(self):
+        import importlib.util, json
+        spec = importlib.util.spec_from_file_location(
+            "clone_study", Path(__file__).parent / ".claude/skills/clone-lichess-study/scripts/clone_study.py")
+        self.cs = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.cs)
+        self.cs.time.sleep = lambda s: None
+        self.pgn = demo_data.teacher_studies()["klase002"][1]
+        self.calls, self.existing = [], []
+
+        def fake(method, path, token, data=None, accept="application/json"):
+            self.calls.append((method, path.split("?")[0], data or {}))
+            if path == "/api/account":
+                return {"username": "julen"}
+            if path.startswith("/api/study/klase002.pgn"):
+                return self.pgn
+            if path.startswith("/api/study/by/"):
+                return "\n".join(json.dumps(s) for s in self.existing)
+            if method == "POST" and path == "/api/study":
+                return {"id": "NEWSTUDY"}
+            if path == "/api/study/NEWSTUDY.pgn":
+                return '[ChapterURL "https://lichess.org/study/NEWSTUDY/BLANKCH1"]\n\n*'
+            if path.endswith("/import-pgn"):
+                return {"chapters": [{"id": "x"}], "error": None}
+            return ""
+        self.cs.request = fake
+
+    def test_rebuilds_every_chapter_and_removes_the_blank_one(self):
+        r = self.cs.clone("https://lichess.org/study/klase002/abcdefgh", "t", suffix=" - julen", log=lambda *a: None)
+        self.assertEqual((r["name"], r["chapters"], r["id"]), ("Online Klase2 - julen", 6, "NEWSTUDY"))
+        imports = [c for c in self.calls if c[1].endswith("/import-pgn")]
+        self.assertEqual([c[2]["name"] for c in imports][:2], ["EBAZPENA", "EBAZPENA"])
+        self.assertIn('[FEN "6k1/5ppp/8/8/8/8/5PPP/R5K1 w - - 0 1"]', imports[0][2]["pgn"])
+        self.assertNotIn("ChapterURL", imports[0][2]["pgn"])
+        order = [c[0] + c[1] for c in self.calls]
+        self.assertLess(order.index("POST/api/study/NEWSTUDY/import-pgn"), order.index("DELETE/api/study/NEWSTUDY/BLANKCH1"))
+        create = next(c for c in self.calls if c[1] == "/api/study")
+        self.assertEqual(create[2]["visibility"], "unlisted")
+
+    def test_refuses_duplicate_name(self):
+        self.existing = [{"id": "OLDCOPY1", "name": "Online Klase2 - julen"}]
+        with self.assertRaises(self.cs.LichessError):
+            self.cs.clone("klase002", "t", suffix=" - julen", log=lambda *a: None)
+        self.assertFalse(any(c[0] == "POST" for c in self.calls))
+
+    def test_recorded_clones_feed_the_tracker(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg_path = Path(tmp) / "config.toml"
+            cfg_path.write_text('student = "julen"\nteacher = "coach"\n')
+            (Path(tmp) / "shared_studies.txt").write_text("# header\nklase002 NEWSTUDY 2026-11-18 Online Klase2 - julen\n")
+            cfg = Config.load(cfg_path)
+            self.assertEqual((cfg.extra_studies, cfg.clone_links), (["klase002"], {"klase002": "NEWSTUDY"}))
+
+
 if __name__ == "__main__":
     unittest.main()

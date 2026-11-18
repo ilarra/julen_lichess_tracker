@@ -37,6 +37,23 @@ One-time setup in the repository settings:
 
 Usernames come from `config.example.toml`.
 
+## Cloning a teacher's study into Julen's account
+
+Lichess has no clone API, so `.claude/skills/clone-lichess-study/scripts/clone_study.py` rebuilds the
+study: new **unlisted** study named `<original> - julen`, every chapter imported with its position,
+moves, comments and orientation, and the empty starter chapter removed. It refuses to make a second
+copy with the same name.
+
+* **From GitHub (any device):** Actions → **Clone study** → Run workflow → paste the link.
+  It records the original in `shared_studies.txt` (so the tracker knows which moves are the teacher's)
+  and refreshes the dashboard. Needs the repository secret `LICHESS_WRITE_TOKEN`: a token for Julen's
+  account with `study:read` + `study:write`. Keep `LICHESS_TOKEN` read-only for the daily sync.
+* **From a chat:** the `clone-lichess-study` skill. Claude Code sessions with this repo load it
+  automatically; for claude.ai, upload `clone-lichess-study.zip` under Settings → Capabilities → Skills.
+  It starts the workflow when it can reach GitHub, runs the script directly where `lichess.org` and a
+  `LICHESS_TOKEN` are available, and otherwise gives you the workflow link.
+* **From a terminal:** `LICHESS_TOKEN=… python3 .claude/skills/clone-lichess-study/scripts/clone_study.py <link> --suffix " - julen"`
+
 ## Local setup (mini PC, optional)
 
 ```bash

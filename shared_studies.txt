@@ -1,0 +1,2 @@
+# Studies copied into Julen's account by the "Clone study" workflow (one per line):
+# original_study_id  copy_study_id  date  copy name

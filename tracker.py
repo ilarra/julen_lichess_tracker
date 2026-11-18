@@ -90,6 +90,16 @@ class Config:
         cfg.engine_depth = raw.get("engine_depth", cfg.engine_depth)
         cfg.engine_seconds = raw.get("engine_seconds", cfg.engine_seconds)
         cfg.engine_tolerance_cp = raw.get("engine_tolerance_cp", cfg.engine_tolerance_cp)
+        # studies copied with the Clone study workflow: "original_id copy_id date name" per line
+        shared = path.parent / raw.get("shared_studies_file", "shared_studies.txt")
+        if shared.exists():
+            for line in shared.read_text().splitlines():
+                parts = line.split()
+                if len(parts) >= 2 and not line.lstrip().startswith("#"):
+                    orig, copy = study_id_from(parts[0]), study_id_from(parts[1])
+                    if orig not in cfg.extra_studies:
+                        cfg.extra_studies.append(orig)
+                    cfg.clone_links.setdefault(orig, copy)
         if "db_path" in raw:
             cfg.db_path = (path.parent / raw["db_path"]).resolve()
         if "report_path" in raw:
