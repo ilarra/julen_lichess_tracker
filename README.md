@@ -46,8 +46,9 @@ copy with the same name.
 
 * **From GitHub (any device):** Actions → **Clone study** → Run workflow → paste the link.
   It records the original in `shared_studies.txt` (so the tracker knows which moves are the teacher's)
-  and refreshes the dashboard. Needs the repository secret `LICHESS_WRITE_TOKEN`: a token for Julen's
-  account with `study:read` + `study:write`. Keep `LICHESS_TOKEN` read-only for the daily sync.
+  and refreshes the dashboard. It also sends the copy's link to markel3 as a Lichess message
+  (text in `clone_message.txt`; untick *notify* to skip). Needs the repository secret
+  `LICHESS_WRITE_TOKEN`: a token for Julen's account with `study:read` + `study:write` + `msg:write`. Keep `LICHESS_TOKEN` read-only for the daily sync.
 * **From a chat:** the `clone-lichess-study` skill. Claude Code sessions with this repo load it
   automatically; for claude.ai, upload `clone-lichess-study.zip` under Settings → Capabilities → Skills.
   It starts the workflow when it can reach GitHub, runs the script directly where `lichess.org` and a

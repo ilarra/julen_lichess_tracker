@@ -6,6 +6,10 @@ chapters as PGN, creates a new study and imports them one by one (keeping each c
 name, starting position, moves, comments and board orientation), then removes the empty
 chapter Lichess adds to every new study.
 
+Optionally sends the new study's link to someone (the teacher) as a Lichess private message;
+that needs the msg:write scope too. Lichess's API can't add study members, so a message with the
+link is how the copy is shared (copies are unlisted: anyone with the link can open them).
+
 Needs a personal token with the study:read and study:write scopes, in LICHESS_TOKEN.
 Standard library only, so it runs anywhere with Python 3.9+.
 
@@ -86,6 +90,22 @@ def split_chapters(pgn: str) -> list[dict]:
     return chapters
 
 
+def notify(user: str, template: str, result: dict, token: str, log=print) -> bool:
+    """Send the copy's link to `user`. Never fails the clone: a missing scope is only reported."""
+    text = template.format(url=result["url"], name=result["name"], original_name=result["original_name"],
+                           original_url=f"{API}/study/{result['original']}").strip()
+    try:
+        request("POST", f"/api/msg/{user}", token, {"text": text})
+    except LichessError as e:
+        if "refused the token" in str(e):
+            log(f"Not sent to {user}: the token needs the msg:write scope to send messages.")
+        else:
+            log(f"Not sent to {user}: {e}")
+        return False
+    log(f"Sent the link to {user}")
+    return True
+
+
 def clone(source: str, token: str, name: str | None = None, suffix: str = "", visibility: str = "unlisted",
           force: bool = False, dry_run: bool = False, log=print) -> dict:
     sid = study_id(source)
@@ -148,6 +168,10 @@ def main(argv=None):
     ap.add_argument("--visibility", choices=["public", "unlisted", "private"], default="unlisted")
     ap.add_argument("--force", action="store_true", help="copy even if a study with that name exists")
     ap.add_argument("--dry-run", action="store_true", help="show what would be copied, change nothing")
+    ap.add_argument("--notify", metavar="USER", help="send the copy's link to this Lichess user")
+    ap.add_argument("--message", default="Hi! Here is my copy of {original_name}: {url}",
+                    help="message text; {url} {name} {original_name} {original_url} are filled in "
+                         "(or @path to read it from a file)")
     ap.add_argument("--record", help="append 'original_id copy_id date name' to this file")
     ap.add_argument("--summary", help="write a Markdown summary to this file (e.g. $GITHUB_STEP_SUMMARY)")
     args = ap.parse_args(argv)
@@ -162,6 +186,10 @@ def main(argv=None):
             with open(args.summary, "a") as f:
                 f.write(f"### Clone failed\n\n{e}\n")
         sys.exit(f"Error: {e}")
+    result["notified"] = None
+    if args.notify and result["id"]:
+        template = open(args.message[1:]).read() if args.message.startswith("@") else args.message
+        result["notified"] = notify(args.notify, template, result, token)
     if args.record and result["id"]:
         with open(args.record, "a") as f:
             f.write(f"{result['original']} {result['id']} {date.today()} {result['name']}\n")
@@ -169,7 +197,10 @@ def main(argv=None):
         with open(args.summary, "a") as f:
             f.write(f"### {'Would copy' if args.dry_run else 'Copied'} {result['original_name']}\n\n"
                     f"{result['chapters']} chapters → **{result['name']}**"
-                    + (f"\n\n{result['url']}\n" if result["url"] else "\n"))
+                    + (f"\n\n{result['url']}\n" if result["url"] else "\n")
+                    + {True: f"\nLink sent to {args.notify}.\n",
+                       False: f"\n**Link not sent to {args.notify}** (see log: token needs msg:write).\n"}.get(
+                        result["notified"], ""))
     print(json.dumps(result))
 
 

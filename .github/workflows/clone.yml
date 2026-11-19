@@ -14,6 +14,10 @@ on:
         description: "Copy even if Julen already has a study with that name"
         type: boolean
         default: false
+      notify:
+        description: "Send the copy's link to markel3 (text in clone_message.txt)"
+        type: boolean
+        default: true
 
 permissions:
   contents: write   # record the original in shared_studies.txt
@@ -39,9 +43,10 @@ jobs:
           STUDY_URL: ${{ inputs.study_url }}
           STUDY_NAME: ${{ inputs.name }}
           FORCE: ${{ inputs.force && '--force' || '' }}
+          NOTIFY: ${{ inputs.notify && '--notify markel3' || '' }}
         run: |
           python .claude/skills/clone-lichess-study/scripts/clone_study.py "$STUDY_URL" \
-            --name "$STUDY_NAME" --suffix " - julen" $FORCE \
+            --name "$STUDY_NAME" --suffix " - julen" $FORCE $NOTIFY --message @clone_message.txt \
             --record shared_studies.txt --summary "$GITHUB_STEP_SUMMARY"
 
       - name: Remember the original for the tracker

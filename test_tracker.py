@@ -195,6 +195,22 @@ class CloneTest(unittest.TestCase):
         create = next(c for c in self.calls if c[1] == "/api/study")
         self.assertEqual(create[2]["visibility"], "unlisted")
 
+    def test_sends_link_to_teacher(self):
+        r = self.cs.clone("klase002", "t", suffix=" - julen", log=lambda *a: None)
+        self.assertTrue(self.cs.notify("markel3", "Kaixo! {url}", r, "t", log=lambda *a: None))
+        msg = self.calls[-1]
+        self.assertEqual((msg[0], msg[1], msg[2]["text"]),
+                         ("POST", "/api/msg/markel3", "Kaixo! https://lichess.org/study/NEWSTUDY"))
+
+    def test_missing_message_scope_does_not_fail_the_clone(self):
+        r = self.cs.clone("klase002", "t", suffix=" - julen", log=lambda *a: None)
+        def refuse(*a, **k):
+            raise self.cs.LichessError("Lichess refused the token (403).")
+        self.cs.request = refuse
+        logged = []
+        self.assertFalse(self.cs.notify("markel3", "{url}", r, "t", log=logged.append))
+        self.assertIn("msg:write", logged[0])
+
     def test_refuses_duplicate_name(self):
         self.existing = [{"id": "OLDCOPY1", "name": "Online Klase2 - julen"}]
         with self.assertRaises(self.cs.LichessError):
