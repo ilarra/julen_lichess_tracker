@@ -18,6 +18,10 @@ on:
         description: "Send the copy's link to markel3 (text in clone_message.txt)"
         type: boolean
         default: true
+      share_only:
+        description: "The link is already Julen's copy: don't clone, only send it to markel3"
+        type: boolean
+        default: false
 
 permissions:
   contents: write   # record the original in shared_studies.txt
@@ -37,7 +41,17 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Only send an existing copy to markel3
+        if: inputs.share_only
+        env:
+          LICHESS_TOKEN: ${{ secrets.LICHESS_WRITE_TOKEN || secrets.LICHESS_TOKEN }}
+          STUDY_URL: ${{ inputs.study_url }}
+        run: |
+          python .claude/skills/clone-lichess-study/scripts/clone_study.py "$STUDY_URL" --share-only \
+            --notify markel3 --message @clone_message.txt --summary "$GITHUB_STEP_SUMMARY"
+
       - name: Copy the study into Julen's account
+        if: ${{ !inputs.share_only }}
         env:
           LICHESS_TOKEN: ${{ secrets.LICHESS_WRITE_TOKEN || secrets.LICHESS_TOKEN }}
           STUDY_URL: ${{ inputs.study_url }}
@@ -50,6 +64,7 @@ jobs:
             --record shared_studies.txt --summary "$GITHUB_STEP_SUMMARY"
 
       - name: Remember the original for the tracker
+        if: ${{ !inputs.share_only }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -58,6 +73,7 @@ jobs:
           git push -q
 
       - name: Refresh the dashboard
+        if: ${{ !inputs.share_only }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run sync.yml --ref main

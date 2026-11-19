@@ -172,6 +172,8 @@ def main(argv=None):
     ap.add_argument("--message", default="Hi! Here is my copy of {original_name}: {url}",
                     help="message text; {url} {name} {original_name} {original_url} are filled in "
                          "(or @path to read it from a file)")
+    ap.add_argument("--share-only", action="store_true",
+                    help="the study is an existing copy: don't clone, just send its link (needs --notify)")
     ap.add_argument("--record", help="append 'original_id copy_id date name' to this file")
     ap.add_argument("--summary", help="write a Markdown summary to this file (e.g. $GITHUB_STEP_SUMMARY)")
     args = ap.parse_args(argv)
@@ -179,6 +181,25 @@ def main(argv=None):
     token = os.environ.get("LICHESS_TOKEN", "")
     if not token:
         sys.exit("Set LICHESS_TOKEN to a Lichess token with the study:read and study:write scopes.")
+    if args.share_only:
+        if not args.notify:
+            sys.exit("--share-only needs --notify USER")
+        try:
+            sid = study_id(args.study)
+            chapters = split_chapters(request("GET", f"/api/study/{sid}.pgn?clocks=false", token,
+                                              accept="application/x-chess-pgn"))
+        except LichessError as e:
+            sys.exit(f"Error: {e}")
+        name = chapters[0]["study_name"] if chapters else sid
+        result = {"original": sid, "original_name": name, "name": name, "id": sid,
+                  "url": f"{API}/study/{sid}", "chapters": len(chapters)}
+        template = open(args.message[1:]).read() if args.message.startswith("@") else args.message
+        ok = notify(args.notify, template, result, token)
+        if args.summary:
+            with open(args.summary, "a") as f:
+                f.write(f"### {'Sent' if ok else 'Could not send'} {name} to {args.notify}\n\n{result['url']}\n"
+                        + ("" if ok else "\nThe token needs the **msg:write** scope.\n"))
+        sys.exit(0 if ok else 1)
     try:
         result = clone(args.study, token, args.name or None, args.suffix, args.visibility, args.force, args.dry_run)
     except LichessError as e:
