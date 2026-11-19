@@ -200,7 +200,7 @@ class CloneTest(unittest.TestCase):
         self.assertTrue(self.cs.notify("markel3", "Kaixo! {url}", r, "t", log=lambda *a: None))
         msg = self.calls[-1]
         self.assertEqual((msg[0], msg[1], msg[2]["text"]),
-                         ("POST", "/api/msg/markel3", "Kaixo! https://lichess.org/study/NEWSTUDY"))
+                         ("POST", "/inbox/markel3", "Kaixo! https://lichess.org/study/NEWSTUDY"))
 
     def test_missing_message_scope_does_not_fail_the_clone(self):
         r = self.cs.clone("klase002", "t", suffix=" - julen", log=lambda *a: None)

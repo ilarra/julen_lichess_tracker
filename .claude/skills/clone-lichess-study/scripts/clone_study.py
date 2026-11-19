@@ -59,7 +59,9 @@ def request(method: str, path: str, token: str, data: dict | None = None, accept
                 raise LichessError(f"Lichess refused the token ({e.code}). It needs the study:read and "
                                    f"study:write scopes. {detail}") from None
             if e.code == 404:
-                raise LichessError(f"Not found: {path}. The study may be private and not shared with this account.") from None
+                what = "That user doesn't exist." if path.startswith("/inbox/") else \
+                    "The study may be private and not shared with this account."
+                raise LichessError(f"Not found: {path}. {what}") from None
             raise LichessError(f"{method} {path} failed with {e.code}: {detail}") from None
     raise LichessError(f"{method} {path}: still rate limited")
 
@@ -95,7 +97,7 @@ def notify(user: str, template: str, result: dict, token: str, log=print) -> boo
     text = template.format(url=result["url"], name=result["name"], original_name=result["original_name"],
                            original_url=f"{API}/study/{result['original']}").strip()
     try:
-        request("POST", f"/api/msg/{user}", token, {"text": text})
+        request("POST", f"/inbox/{user}", token, {"text": text})
     except LichessError as e:
         if "refused the token" in str(e):
             log(f"Not sent to {user}: the token needs the msg:write scope to send messages.")
