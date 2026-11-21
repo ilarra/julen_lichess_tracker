@@ -386,10 +386,8 @@ def chapter_kind(cfg: Config, ch: Chapter) -> str:
     upper = ch.name.upper()
     if any(n.upper() in upper for n in cfg.solution_names):
         return "solution"
-    if ch.is_game:
-        return "game"
     if not ch.set_up:
-        return "other"   # starts from the initial position: opening work or free analysis
+        return "game" if ch.is_game else "other"   # starts from the initial position: played game, opening work, or free analysis
     if any(n.upper() in upper for n in cfg.homework_names):
         return "homework"
     return "exercise"

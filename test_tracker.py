@@ -5,8 +5,8 @@ from pathlib import Path
 
 import demo_data
 from demo_data import DEMO_CONFIG
-from tracker import (Config, analyse_positions, build_progress, connect, engine_difficulty, find_stockfish,
-                     parse_study_pgn, render_report, study_id_from, sync, track_of)
+from tracker import (Config, analyse_positions, build_progress, chapter_kind, connect, engine_difficulty,
+                     find_stockfish, parse_study_pgn, render_report, study_id_from, sync, track_of)
 
 
 class CountingLichess(demo_data.FakeLichess):
@@ -97,6 +97,17 @@ class TrackerTest(unittest.TestCase):
         self.assertEqual(study_id_from("https://lichess.org/study/AbCdEfGh/IjKlMnOp"), "AbCdEfGh")
         chs = parse_study_pgn("x", demo_data.student_studies()["jklase02"][1])
         self.assertEqual([c.is_game for c in chs], [False, False, False, True, False, False])
+
+    def test_setup_position_with_player_tags_is_not_a_game(self):
+        pgn = "\n\n".join([
+            '[ChapterName "ETXERAKO PROBLEMA"]\n[White "Emanuel Lasker"]\n[Black "N.N."]\n'
+            '[FEN "3r1k1r/2N1bppp/8/8/2B1Pp2/8/1Pn3PP/3R1RK1 w - - 0 23"]\n[SetUp "1"]\n\n*',
+            '[ChapterName "Torre contra caballo IV - Kamsky-Bacrot"]\n[White "Torre contra caballo IV"]\n'
+            '[Black "Kamsky-Bacrot"]\n[FEN "6k1/5R2/6K1/8/8/8/8/6b1 w - - 0 1"]\n[SetUp "1"]\n\n*',
+            '[ChapterName "A - B"]\n[White "A"]\n[Black "B"]\n\n1. e4 e5 *',
+        ])
+        chs = parse_study_pgn("s1", pgn)
+        self.assertEqual([chapter_kind(self.cfg, c) for c in chs], ["homework", "exercise", "game"])
 
 
 class DifficultyTest(unittest.TestCase):
