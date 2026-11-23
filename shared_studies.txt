@@ -1,3 +1,4 @@
 # Studies copied into Julen's account by the "Clone study" workflow (one per line):
 # original_study_id  copy_study_id  date  copy name
 OpM6Dd7H oUuRNaFk 2026-11-19 Aloñamendi Online Klase7 - julen
+NdWmseq0 qyYCa8Ew 2026-11-23 Julen XakeKlase29 - julen
